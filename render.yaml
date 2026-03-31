@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: hype-dca-bot
+    runtime: python
+    pythonVersion: "3.11.9"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    plan: free
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false          # pegar manualmente en Render → Environment
+      - key: TELEGRAM_CHAT_ID
+        sync: false          # pegar manualmente en Render → Environment
+      - key: EMA_PERIOD
+        value: "8"
+      - key: VOL_THRESHOLD
+        value: "70000"       # USDT de volumen mínimo por vela 1m
+      - key: DCA_ROI_TH
+        value: "-1.6"        # % ROI combinado para activar DCA 2 y 3
+      - key: TP_ROI
+        value: "1.0"         # % ROI combinado para cerrar todas las posiciones
+      - key: DCA1
+        value: "12"          # USDT — posición 1 (entrada inicial)
+      - key: DCA2
+        value: "12"          # USDT — posición 2 (primer DCA)
+      - key: DCA3
+        value: "24"          # USDT — posición 3 (segundo DCA)

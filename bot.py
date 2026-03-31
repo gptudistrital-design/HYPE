@@ -57,7 +57,7 @@ KLINES_LIMIT   = 1500
 INTERVAL       = "1m"
 PORT           = int(os.environ.get("PORT", "10000"))
 WS_RECONNECT   = 5      # segundos entre reconexiones WS
-REFRESH_MIN    = 30     # minutos entre refrescos del histórico REST
+REFRESH_MIN    = 2     # minutos entre refrescos del histórico REST
 
 # ══════════════════════════════════════════════════════════
 #  ESTADO GLOBAL

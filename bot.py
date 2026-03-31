@@ -164,9 +164,12 @@ async def fetch_klines(session: aiohttp.ClientSession) -> bool:
             data = await r.json()
             closes.clear()
             volumes.clear()
-            for k in data:
+            # Excluimos la última vela: puede estar AÚN ABIERTA (parcial)
+            # k[5] = base asset volume (HYPE tokens) — lo que se ve en el chart
+            # k[7] = quote asset volume (USDT) — NO usar, no coincide con el chart
+            for k in data[:-1]:
                 closes.append(float(k[4]))   # [4] close price
-                volumes.append(float(k[7]))  # [7] quote asset volume (USDT)
+                volumes.append(float(k[5]))  # [5] base asset volume (HYPE tokens)
             current_ema8 = calc_ema(list(closes), EMA_PERIOD)
             bot_state["candles_ok"] = len(closes)
             log.info(
@@ -209,7 +212,7 @@ async def on_candle_close(
     price_ok = close_price < ema8             # ¿precio por debajo de EMA8?
 
     log.info(
-        f"🕯  VELA | close={close_price:.4f}  vol={volume:,.0f} USDT  "
+        f"🕯  VELA | close={close_price:.4f}  vol={volume:,.2f} HYPE  "
         f"EMA{EMA_PERIOD}={ema8:.4f}  pos={n}/3  roi={roi:+.3f}%  "
         f"vol✓={vol_ok}  price<EMA✓={price_ok}"
     )
@@ -270,7 +273,7 @@ async def open_position(
         f"💼 Total invertido: <b>{total_cost:.0f} USDT</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📈 EMA {EMA_PERIOD}:          <b>${ema8:.6f}</b>\n"
-        f"📊 Volumen vela:    <b>{volume:,.0f} USDT</b>\n"
+        f"📊 Volumen vela:    <b>{volume:,.2f} HYPE</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎯 Entry promedio:  <b>${entry_avg:.6f}</b>\n"
         f"📉 ROI combinado:   <b>{roi_now:+.3f}%</b>\n"
@@ -376,7 +379,9 @@ async def ws_loop(session: aiohttp.ClientSession):
                                 await on_candle_close(
                                     session,
                                     float(k["c"]),  # close price
-                                    float(k["q"]),  # quote volume (USDT)
+                                    float(k["v"]),  # base asset volume (HYPE tokens)
+                                    # k["q"] = USDT (precio×qty) — NO usar,
+                                    # k["v"] = HYPE coins, coincide con el chart
                                 )
 
                         # ── MarkPrice: precio cada segundo ──────────
@@ -477,7 +482,7 @@ def build_dashboard() -> str:
 
 <h1>🤖 HYPEUSDT Futures — DCA Long Bot</h1>
 <p class="sub">
-  EMA{EMA_PERIOD} | Vol &gt; {VOL_THRESHOLD:,.0f} USDT/vela | DCA si ROI &lt; {DCA_ROI_TH}% |
+  EMA{EMA_PERIOD} | Vol &gt; {VOL_THRESHOLD:,.0f} <b>HYPE</b>/vela | DCA si ROI &lt; {DCA_ROI_TH}% |
   TP {TP_ROI}% | Sizes: {DCA1:.0f}+{DCA2:.0f}+{DCA3:.0f} USDT | 1m | Binance Futures
 </p>
 
@@ -522,7 +527,7 @@ def build_dashboard() -> str:
   </div>
   <div class="card">
     <div class="lbl">Vol última vela</div>
-    <div class="val {'ok' if bot_state['last_vol'] > VOL_THRESHOLD else ''}">{bot_state['last_vol']:,.0f} U</div>
+    <div class="val {'ok' if bot_state['last_vol'] > VOL_THRESHOLD else ''}">{bot_state['last_vol']:,.2f} HYPE</div>
   </div>
   <div class="card">
     <div class="lbl">Última vela cerrada</div>
@@ -570,7 +575,7 @@ def build_dashboard() -> str:
 
 <p class="footer">
   Actualización automática cada 10 s | {now_utc()} |
-  Estrategia: HYPEUSDT Long DCA | EMA{EMA_PERIOD} + Vol{VOL_THRESHOLD:,.0f} USDT | TP {TP_ROI}%
+  Estrategia: HYPEUSDT Long DCA | EMA{EMA_PERIOD} + Vol&gt;{VOL_THRESHOLD:,.0f} HYPE | TP {TP_ROI}%
 </p>
 
 </body>
@@ -624,7 +629,7 @@ async def bot_loop():
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"📊 Par:         <b>HYPEUSDT</b> Futures Perpetual\n"
             f"📈 EMA:         <b>EMA {EMA_PERIOD}</b>  |  Timeframe: <b>1m</b>\n"
-            f"📊 Vol mínimo:  <b>{VOL_THRESHOLD:,.0f} USDT/vela</b>\n"
+            f"📊 Vol mínimo:  <b>{VOL_THRESHOLD:,.0f} HYPE/vela</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"💼 DCA Pos 1:   <b>{DCA1:.0f} USDT</b>  (vol&gt;{VOL_THRESHOLD:,.0f} + precio&lt;EMA{EMA_PERIOD})\n"
             f"💼 DCA Pos 2:   <b>{DCA2:.0f} USDT</b>  (ROI &lt; {DCA_ROI_TH}% + condición vol/EMA)\n"

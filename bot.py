@@ -39,8 +39,11 @@ EMA_PERIOD    = int(os.environ.get("EMA_PERIOD",    "8"))
 # Volumen mínimo en USDT (campo "q" del kline = quote asset volume)
 VOL_THRESHOLD = float(os.environ.get("VOL_THRESHOLD", "70000"))
 
-# ROI combinado mínimo para activar DCA (negativo = pérdida)
+# ROI combinado mínimo para activar DCA #1-#3 (negativo = pérdida)
 DCA_ROI_TH    = float(os.environ.get("DCA_ROI_TH", "-1.6"))
+
+# ROI combinado para activar el DCA de Rescate #4 (debe ser < -4%)
+DCA4_ROI_TH   = float(os.environ.get("DCA4_ROI_TH", "-4.0"))
 
 # ROI combinado para cerrar todas las posiciones (Take Profit)
 TP_ROI        = float(os.environ.get("TP_ROI", "1.0"))
@@ -49,7 +52,9 @@ TP_ROI        = float(os.environ.get("TP_ROI", "1.0"))
 DCA1 = float(os.environ.get("DCA1", "12"))
 DCA2 = float(os.environ.get("DCA2", "12"))
 DCA3 = float(os.environ.get("DCA3", "24"))
-DCA_SIZES = [DCA1, DCA2, DCA3]
+# DCA Rescate = suma de las 3 anteriores × 3
+DCA4 = float(os.environ.get("DCA4", str((DCA1 + DCA2 + DCA3) * 3)))
+DCA_SIZES = [DCA1, DCA2, DCA3, DCA4]
 
 BINANCE_REST   = "https://fapi.binance.com"
 BINANCE_WS     = "wss://fstream.binance.com"
@@ -213,7 +218,7 @@ async def on_candle_close(
 
     log.info(
         f"🕯  VELA | close={close_price:.4f}  vol={volume:,.2f} HYPE  "
-        f"EMA{EMA_PERIOD}={ema8:.4f}  pos={n}/3  roi={roi:+.3f}%  "
+        f"EMA{EMA_PERIOD}={ema8:.4f}  pos={n}/4  roi={roi:+.3f}%  "
         f"vol✓={vol_ok}  price<EMA✓={price_ok}"
     )
 
@@ -225,11 +230,15 @@ async def on_candle_close(
     elif n == 1 and roi < DCA_ROI_TH and vol_ok and price_ok:
         await open_position(session, close_price, 1, volume, ema8)
 
-    # ── Pos 3: DCA final ─────────────────────────────────
+    # ── Pos 3: DCA ───────────────────────────────────────
     elif n == 2 and roi < DCA_ROI_TH and vol_ok and price_ok:
         await open_position(session, close_price, 2, volume, ema8)
 
-    # n == 3: máximo DCA alcanzado, solo monitorear TP via markPrice WS
+    # ── Pos 4: DCA Rescate — solo si ROI < -4% tras 3 posiciones ──
+    elif n == 3 and roi < DCA4_ROI_TH and vol_ok and price_ok:
+        await open_position(session, close_price, 3, volume, ema8)
+
+    # n == 4: máximo DCA alcanzado, solo monitorear TP via markPrice WS
 
 
 async def open_position(
@@ -256,8 +265,9 @@ async def open_position(
     entry_avg  = avg_entry_price()
     total_cost = sum(p["size"] for p in positions)
 
-    labels = ["🟢 ENTRADA LONG", "🔵 DCA #2", "🟡 DCA #3"]
+    labels = ["🟢 ENTRADA LONG", "🔵 DCA #2", "🟡 DCA #3", "🔴 DCA RESCATE #4"]
     label  = labels[idx]
+    slot   = f"{idx+1}/4"
 
     log.info(
         f"{label} @ {price:.6f} | size={size} USDT | qty={qty:.4f} | "
@@ -269,7 +279,7 @@ async def open_position(
         f"{label} — HYPEUSDT Futures\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💰 Precio entrada:  <b>${price:.6f}</b>\n"
-        f"📦 Tamaño pos:      <b>{size:.0f} USDT</b>  [{idx+1}/3]\n"
+        f"📦 Tamaño pos:      <b>{size:.0f} USDT</b>  [{slot}]\n"
         f"💼 Total invertido: <b>{total_cost:.0f} USDT</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📈 EMA {EMA_PERIOD}:          <b>${ema8:.6f}</b>\n"
@@ -483,7 +493,8 @@ def build_dashboard() -> str:
 <h1>🤖 HYPEUSDT Futures — DCA Long Bot</h1>
 <p class="sub">
   EMA{EMA_PERIOD} | Vol &gt; {VOL_THRESHOLD:,.0f} <b>HYPE</b>/vela | DCA si ROI &lt; {DCA_ROI_TH}% |
-  TP {TP_ROI}% | Sizes: {DCA1:.0f}+{DCA2:.0f}+{DCA3:.0f} USDT | 1m | Binance Futures
+  DCA Rescate si ROI &lt; {DCA4_ROI_TH}% | TP {TP_ROI}% |
+  Sizes: {DCA1:.0f}+{DCA2:.0f}+{DCA3:.0f}+{DCA4:.0f} USDT | 1m | Binance Futures
 </p>
 
 <div class="cards">
@@ -507,7 +518,7 @@ def build_dashboard() -> str:
   </div>
   <div class="card">
     <div class="lbl">Posiciones DCA</div>
-    <div class="val {'ok' if positions else ''}">{len(positions)}/3</div>
+    <div class="val {'ok' if positions else ''}">{len(positions)}/4</div>
   </div>
   <div class="card">
     <div class="lbl">ROI combinado</div>
@@ -634,7 +645,8 @@ async def bot_loop():
             f"💼 DCA Pos 1:   <b>{DCA1:.0f} USDT</b>  (vol&gt;{VOL_THRESHOLD:,.0f} + precio&lt;EMA{EMA_PERIOD})\n"
             f"💼 DCA Pos 2:   <b>{DCA2:.0f} USDT</b>  (ROI &lt; {DCA_ROI_TH}% + condición vol/EMA)\n"
             f"💼 DCA Pos 3:   <b>{DCA3:.0f} USDT</b>  (ROI &lt; {DCA_ROI_TH}% + condición vol/EMA)\n"
-            f"💰 Máx expuesto:<b>{DCA1+DCA2+DCA3:.0f} USDT</b>\n"
+            f"🔴 DCA Rescate: <b>{DCA4:.0f} USDT</b>  (ROI &lt; {DCA4_ROI_TH}% + condición vol/EMA)\n"
+            f"💰 Máx expuesto:<b>{DCA1+DCA2+DCA3+DCA4:.0f} USDT</b>\n"
             f"🎯 Take Profit: <b>ROI combinado ≥ {TP_ROI}%</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"📡 WS: kline_1m + markPrice@1s\n"
@@ -667,8 +679,8 @@ async def bot_loop():
 async def main():
     log.info("╔══════════════════════════════════════════════════════╗")
     log.info("║      HYPEUSDT Futures — DCA Long Bot                 ║")
-    log.info(f"║  EMA{EMA_PERIOD} | Vol>{VOL_THRESHOLD:,.0f} USDT | DCA@{DCA_ROI_TH}% | TP@{TP_ROI}%    ║")
-    log.info(f"║  Sizes: {DCA1:.0f}+{DCA2:.0f}+{DCA3:.0f}={DCA1+DCA2+DCA3:.0f} USDT max | 1m | Binance Futures ║")
+    log.info(f"║  EMA{EMA_PERIOD} | Vol>{VOL_THRESHOLD:,.0f} USDT | DCA@{DCA_ROI_TH}% | Rescate@{DCA4_ROI_TH}% | TP@{TP_ROI}%    ║")
+    log.info(f"║  Sizes: {DCA1:.0f}+{DCA2:.0f}+{DCA3:.0f}+{DCA4:.0f}={DCA1+DCA2+DCA3+DCA4:.0f} USDT max | 1m | Binance Futures ║")
     log.info("╚══════════════════════════════════════════════════════╝")
 
     await asyncio.gather(
